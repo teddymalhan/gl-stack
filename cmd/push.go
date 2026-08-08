@@ -1,0 +1,139 @@
+package cmd
+
+import (
+	"errors"
+
+	"github.com/spf13/cobra"
+	"github.com/teddymalhan/github-stacker-prs/internal/config"
+	"github.com/teddymalhan/github-stacker-prs/internal/git"
+	"github.com/teddymalhan/github-stacker-prs/internal/modify"
+	"github.com/teddymalhan/github-stacker-prs/internal/stack"
+)
+
+type pushOptions struct {
+	remote string
+}
+
+func PushCmd(cfg *config.Config) *cobra.Command {
+	opts := &pushOptions{}
+
+	cmd := &cobra.Command{
+		Use:   "push",
+		Short: "Push active branches in the current stack to the remote",
+		Long: `Push active branches in the current stack to the remote.
+
+Uses explicit per-branch --force-with-lease checks. Updates are not atomic: a
+branch may update even if another branch is rejected. Fix the rejected branch
+and run the command again; branches already updated will be unchanged.
+Merged and queued branches are automatically skipped.`,
+		Example: `  # Push active stack branches to the default remote
+  $ gl-stack push
+
+  # Push to a specific remote
+  $ gl-stack push --remote upstream`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runPush(cfg, opts)
+		},
+	}
+
+	cmd.Flags().StringVar(&opts.remote, "remote", "", "Remote to push to (defaults to auto-detected remote)")
+
+	return cmd
+}
+
+func runPush(cfg *config.Config, opts *pushOptions) error {
+	gitDir, err := git.GitDir()
+	if err != nil {
+		cfg.Errorf("not a git repository")
+		return ErrNotInStack
+	}
+
+	if err := modify.CheckStateGuard(gitDir); err != nil {
+		cfg.Errorf("%s", err)
+		return ErrModifyRecovery
+	}
+
+	sf, err := stack.Load(gitDir)
+	if err != nil {
+		cfg.Errorf("failed to load stack state: %s", err)
+		return ErrNotInStack
+	}
+
+	currentBranch, err := git.CurrentBranch()
+	if err != nil {
+		cfg.Errorf("failed to get current branch: %s", err)
+		return ErrNotInStack
+	}
+
+	// Find the stack for the current branch without switching branches.
+	// Push should never change the user's checked-out branch.
+	stacks := sf.FindAllStacksForBranch(currentBranch)
+	if len(stacks) == 0 {
+		cfg.Errorf("current branch %q is not part of a stack", currentBranch)
+		return ErrNotInStack
+	}
+	if len(stacks) > 1 {
+		cfg.Errorf("branch %q belongs to multiple stacks; checkout a non-trunk branch first", currentBranch)
+		return ErrDisambiguate
+	}
+	s := stacks[0]
+
+	// Push all active branches with explicit per-branch leases.
+	remote, err := pickRemote(cfg, currentBranch, opts.remote)
+	if err != nil {
+		if !errors.Is(err, errInterrupt) {
+			cfg.Errorf("%s", err)
+		}
+		return ErrSilent
+	}
+	// Sync PR state to detect merged/queued PRs before pushing.
+	_ = syncStackPRs(cfg, s)
+
+	merged := s.MergedBranches()
+	if len(merged) > 0 {
+		cfg.Printf("Skipping %d merged %s", len(merged), plural(len(merged), "branch", "branches"))
+	}
+	queued := s.QueuedBranches()
+	if len(queued) > 0 {
+		cfg.Printf("Skipping %d queued %s", len(queued), plural(len(queued), "branch", "branches"))
+	}
+	activeBranches := activeBranchNames(s)
+	if len(activeBranches) == 0 {
+		cfg.Printf("No active branches to push (all merged or queued)")
+		return nil
+	}
+	// Best-effort fetch to update tracking refs (helps --force-with-lease
+	// in shallow clones). Silently ignored if branches don't exist on the
+	// remote yet.
+	_ = git.FetchBranches(remote, activeBranches)
+	cfg.Printf("Pushing %d %s to %s...", len(activeBranches), plural(len(activeBranches), "branch", "branches"), remote)
+	if err := git.Push(remote, activeBranches, true, false); err != nil {
+		cfg.Errorf("failed to push: %s", err)
+		return ErrSilent
+	}
+
+	// Update base commit hashes after push
+	updateBaseSHAs(s)
+
+	if err := stack.Save(gitDir, sf); err != nil {
+		return handleSaveError(cfg, err)
+	}
+
+	cfg.Successf("Pushed %d branches", len(activeBranches))
+
+	// Hint about submit only if there are branches without PRs
+	hasBranchWithoutPR := false
+	for _, b := range s.ActiveBranches() {
+		if b.PullRequest == nil {
+			hasBranchWithoutPR = true
+			break
+		}
+	}
+	if hasBranchWithoutPR {
+		cfg.Printf("To create MRs for this stack, run `%s`",
+			cfg.ColorCyan("gl-stack submit"))
+	} else {
+		cfg.Printf("Run `%s` to see your stack of MRs", cfg.ColorCyan("gl-stack view"))
+	}
+	return nil
+}

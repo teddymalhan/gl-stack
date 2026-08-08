@@ -1,0 +1,887 @@
+package cmd
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+	"testing"
+
+	"github.com/AlecAivazis/survey/v2/terminal"
+	"github.com/cli/go-gh/v2/pkg/repository"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/teddymalhan/github-stacker-prs/internal/config"
+	"github.com/teddymalhan/github-stacker-prs/internal/git"
+	"github.com/teddymalhan/github-stacker-prs/internal/gitlab"
+	"github.com/teddymalhan/github-stacker-prs/internal/stack"
+)
+
+func TestIsInterruptError_DirectMatch(t *testing.T) {
+	if !isInterruptError(terminal.InterruptErr) {
+		t.Error("expected true for terminal.InterruptErr")
+	}
+}
+
+func TestIsInterruptError_Wrapped(t *testing.T) {
+	// This is how the prompter library wraps the interrupt error.
+	wrapped := fmt.Errorf("could not prompt: %w", terminal.InterruptErr)
+	if !isInterruptError(wrapped) {
+		t.Error("expected true for wrapped interrupt error")
+	}
+}
+
+func TestIsInterruptError_DoubleWrapped(t *testing.T) {
+	// Simulate additional wrapping by callers.
+	inner := fmt.Errorf("could not prompt: %w", terminal.InterruptErr)
+	outer := fmt.Errorf("stack selection: %w", inner)
+	if !isInterruptError(outer) {
+		t.Error("expected true for double-wrapped interrupt error")
+	}
+}
+
+func TestIsInterruptError_NonInterrupt(t *testing.T) {
+	if isInterruptError(errors.New("some other error")) {
+		t.Error("expected false for non-interrupt error")
+	}
+}
+
+func TestIsInterruptError_Nil(t *testing.T) {
+	if isInterruptError(nil) {
+		t.Error("expected false for nil error")
+	}
+}
+
+func TestPrintInterrupt_Output(t *testing.T) {
+	cfg, outR, errR := config.NewTestConfig()
+	printInterrupt(cfg)
+	output := collectOutput(cfg, outR, errR)
+
+	if !strings.Contains(output, "Received interrupt, aborting operation") {
+		t.Errorf("expected interrupt message, got: %s", output)
+	}
+	// Should NOT contain error marker (✗)
+	if strings.Contains(output, "\u2717") {
+		t.Errorf("interrupt message should not use error format, got: %s", output)
+	}
+}
+
+func TestErrInterrupt_IsDistinct(t *testing.T) {
+	if errors.Is(errInterrupt, terminal.InterruptErr) {
+		t.Error("errInterrupt sentinel should not match terminal.InterruptErr")
+	}
+	if !errors.Is(errInterrupt, errInterrupt) {
+		t.Error("errInterrupt should match itself")
+	}
+}
+
+func TestEnsureRerere_SkipsWhenAlreadyEnabled(t *testing.T) {
+	enableCalled := false
+	restore := git.SetOps(&git.MockOps{
+		IsRerereEnabledFn: func() (bool, error) { return true, nil },
+		EnableRerereFn: func() error {
+			enableCalled = true
+			return nil
+		},
+	})
+	defer restore()
+
+	cfg, outR, errR := config.NewTestConfig()
+	_ = ensureRerere(cfg)
+	collectOutput(cfg, outR, errR)
+
+	if enableCalled {
+		t.Error("EnableRerere should not be called when already enabled")
+	}
+}
+
+func TestEnsureRerere_SkipsWhenDeclined(t *testing.T) {
+	enableCalled := false
+	restore := git.SetOps(&git.MockOps{
+		IsRerereEnabledFn:  func() (bool, error) { return false, nil },
+		IsRerereDeclinedFn: func() (bool, error) { return true, nil },
+		EnableRerereFn: func() error {
+			enableCalled = true
+			return nil
+		},
+	})
+	defer restore()
+
+	cfg, outR, errR := config.NewTestConfig()
+	_ = ensureRerere(cfg)
+	collectOutput(cfg, outR, errR)
+
+	if enableCalled {
+		t.Error("EnableRerere should not be called when user previously declined")
+	}
+}
+
+func TestEnsureRerere_SkipsWhenNonInteractive(t *testing.T) {
+	enableCalled := false
+	declinedSaved := false
+	restore := git.SetOps(&git.MockOps{
+		IsRerereEnabledFn:  func() (bool, error) { return false, nil },
+		IsRerereDeclinedFn: func() (bool, error) { return false, nil },
+		EnableRerereFn: func() error {
+			enableCalled = true
+			return nil
+		},
+		SaveRerereDeclinedFn: func() error {
+			declinedSaved = true
+			return nil
+		},
+	})
+	defer restore()
+
+	// NewTestConfig is non-interactive (pipes, not a TTY).
+	cfg, outR, errR := config.NewTestConfig()
+	_ = ensureRerere(cfg)
+	collectOutput(cfg, outR, errR)
+
+	if enableCalled {
+		t.Error("EnableRerere should not be called in non-interactive mode")
+	}
+	if declinedSaved {
+		t.Error("SaveRerereDeclined should not be called in non-interactive mode")
+	}
+}
+
+func TestResolvePR_ByPRNumber(t *testing.T) {
+	sf := &stack.StackFile{
+		SchemaVersion: 1,
+		Stacks: []stack.Stack{
+			{
+				Trunk: stack.BranchRef{Branch: "main"},
+				Branches: []stack.BranchRef{
+					{Branch: "feat-1", PullRequest: &stack.PullRequestRef{Number: 42, URL: "https://gitlab.com/o/r/-/merge_requests/42"}},
+					{Branch: "feat-2", PullRequest: &stack.PullRequestRef{Number: 43, URL: "https://gitlab.com/o/r/-/merge_requests/43"}},
+				},
+			},
+		},
+	}
+
+	cfg, _, _ := config.NewTestConfig()
+	s, br, err := resolvePR(cfg, sf, "42")
+	assert.NoError(t, err)
+	assert.Equal(t, "feat-1", br.Branch)
+	assert.Equal(t, 42, br.PullRequest.Number)
+	assert.Equal(t, "main", s.Trunk.Branch)
+}
+
+func TestResolvePR_ByPRURL(t *testing.T) {
+	sf := &stack.StackFile{
+		SchemaVersion: 1,
+		Stacks: []stack.Stack{
+			{
+				Trunk: stack.BranchRef{Branch: "main"},
+				Branches: []stack.BranchRef{
+					{Branch: "feat-1", PullRequest: &stack.PullRequestRef{Number: 42, URL: "https://gitlab.com/o/r/-/merge_requests/42"}},
+				},
+			},
+		},
+	}
+
+	cfg, _, _ := config.NewTestConfig()
+	s, br, err := resolvePR(cfg, sf, "https://gitlab.com/o/r/-/merge_requests/42")
+	assert.NoError(t, err)
+	assert.Equal(t, "feat-1", br.Branch)
+	assert.Equal(t, "main", s.Trunk.Branch)
+}
+
+func TestResolvePR_ByBranchName(t *testing.T) {
+	sf := &stack.StackFile{
+		SchemaVersion: 1,
+		Stacks: []stack.Stack{
+			{
+				Trunk: stack.BranchRef{Branch: "main"},
+				Branches: []stack.BranchRef{
+					{Branch: "feat-1", PullRequest: &stack.PullRequestRef{Number: 42}},
+					{Branch: "feat-2", PullRequest: &stack.PullRequestRef{Number: 43}},
+				},
+			},
+		},
+	}
+
+	cfg, _, _ := config.NewTestConfig()
+	s, br, err := resolvePR(cfg, sf, "feat-2")
+	assert.NoError(t, err)
+	assert.Equal(t, "feat-2", br.Branch)
+	assert.Equal(t, 43, br.PullRequest.Number)
+	assert.Equal(t, "main", s.Trunk.Branch)
+}
+
+func TestResolvePR_NotFound(t *testing.T) {
+	sf := &stack.StackFile{
+		SchemaVersion: 1,
+		Stacks: []stack.Stack{
+			{
+				Trunk:    stack.BranchRef{Branch: "main"},
+				Branches: []stack.BranchRef{{Branch: "feat-1"}},
+			},
+		},
+	}
+
+	cfg, _, _ := config.NewTestConfig()
+	_, _, err := resolvePR(cfg, sf, "nonexistent")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "no locally tracked stack found")
+}
+
+func TestResolvePR_URLPrecedesNumber(t *testing.T) {
+	// A PR URL that contains number 99 should resolve via URL parsing,
+	// even if PR #99 doesn't exist — the URL parser extracts the number.
+	sf := &stack.StackFile{
+		SchemaVersion: 1,
+		Stacks: []stack.Stack{
+			{
+				Trunk: stack.BranchRef{Branch: "main"},
+				Branches: []stack.BranchRef{
+					{Branch: "feat-1", PullRequest: &stack.PullRequestRef{Number: 99, URL: "https://gitlab.com/o/r/-/merge_requests/99"}},
+				},
+			},
+		},
+	}
+
+	cfg, _, _ := config.NewTestConfig()
+	_, br, err := resolvePR(cfg, sf, "https://gitlab.com/o/r/-/merge_requests/99")
+	assert.NoError(t, err)
+	assert.Equal(t, 99, br.PullRequest.Number)
+}
+
+func TestSyncStackPRs_NoTrackedPR_OnlyAdoptsOpenPRs(t *testing.T) {
+	// A branch with no tracked PR should only adopt OPEN PRs,
+	// not stale merged/closed PRs from a previous branch name usage.
+	s := &stack.Stack{
+		Trunk: stack.BranchRef{Branch: "main"},
+		Branches: []stack.BranchRef{
+			{Branch: "reused-branch"}, // no PullRequest
+		},
+	}
+
+	cfg, outR, errR := config.NewTestConfig()
+	cfg.GitLabClientOverride = &gitlab.MockClient{
+		// FindPRForBranch (OPEN only) returns nil — no open PR.
+		FindPRForBranchFn: func(branch string) (*gitlab.PullRequest, error) {
+			return nil, nil
+		},
+	}
+
+	_ = syncStackPRs(cfg, s)
+	collectOutput(cfg, outR, errR)
+
+	// Branch should still have no PR tracked.
+	assert.Nil(t, s.Branches[0].PullRequest)
+}
+
+func TestSyncStackPRs_NoTrackedPR_AdoptsOpenPR(t *testing.T) {
+	// A branch with no tracked PR should adopt an OPEN PR it discovers.
+	s := &stack.Stack{
+		Trunk: stack.BranchRef{Branch: "main"},
+		Branches: []stack.BranchRef{
+			{Branch: "feature"}, // no PullRequest
+		},
+	}
+
+	cfg, outR, errR := config.NewTestConfig()
+	cfg.GitLabClientOverride = &gitlab.MockClient{
+		FindPRForBranchFn: func(branch string) (*gitlab.PullRequest, error) {
+			return &gitlab.PullRequest{
+				Number: 99,
+				ID:     "MR_99",
+				URL:    "https://gitlab.com/o/r/-/merge_requests/99",
+				State:  "OPEN",
+			}, nil
+		},
+	}
+
+	_ = syncStackPRs(cfg, s)
+	collectOutput(cfg, outR, errR)
+
+	require.NotNil(t, s.Branches[0].PullRequest)
+	assert.Equal(t, 99, s.Branches[0].PullRequest.Number)
+	assert.False(t, s.Branches[0].PullRequest.Merged)
+}
+
+func TestSyncStackPRs_TrackedPR_DetectsMerge(t *testing.T) {
+	// A branch with a tracked PR should detect when that PR gets merged.
+	s := &stack.Stack{
+		Trunk: stack.BranchRef{Branch: "main"},
+		Branches: []stack.BranchRef{
+			{
+				Branch: "feature",
+				PullRequest: &stack.PullRequestRef{
+					Number: 42,
+					ID:     "MR_42",
+					URL:    "https://gitlab.com/o/r/-/merge_requests/42",
+				},
+			},
+		},
+	}
+
+	cfg, outR, errR := config.NewTestConfig()
+	cfg.GitLabClientOverride = &gitlab.MockClient{
+		FindPRByNumberFn: func(number int) (*gitlab.PullRequest, error) {
+			return &gitlab.PullRequest{
+				Number: 42,
+				ID:     "MR_42",
+				URL:    "https://gitlab.com/o/r/-/merge_requests/42",
+				State:  "MERGED",
+				Merged: true,
+			}, nil
+		},
+	}
+
+	_ = syncStackPRs(cfg, s)
+	collectOutput(cfg, outR, errR)
+
+	require.NotNil(t, s.Branches[0].PullRequest)
+	assert.Equal(t, 42, s.Branches[0].PullRequest.Number)
+	assert.True(t, s.Branches[0].PullRequest.Merged)
+}
+
+func TestSyncStackPRs_MergedBranch_StaysMerged(t *testing.T) {
+	// A merged branch should stay merged — no API calls, no changes.
+	s := &stack.Stack{
+		Trunk: stack.BranchRef{Branch: "main"},
+		Branches: []stack.BranchRef{
+			{
+				Branch: "merged-branch",
+				PullRequest: &stack.PullRequestRef{
+					Number: 20,
+					ID:     "MR_20",
+					URL:    "https://gitlab.com/o/r/-/merge_requests/20",
+					Merged: true,
+				},
+			},
+		},
+	}
+
+	apiCalled := false
+	cfg, outR, errR := config.NewTestConfig()
+	cfg.GitLabClientOverride = &gitlab.MockClient{
+		FindPRForBranchFn: func(branch string) (*gitlab.PullRequest, error) {
+			apiCalled = true
+			return nil, nil
+		},
+		FindPRByNumberFn: func(number int) (*gitlab.PullRequest, error) {
+			apiCalled = true
+			return nil, nil
+		},
+	}
+
+	_ = syncStackPRs(cfg, s)
+	collectOutput(cfg, outR, errR)
+
+	require.NotNil(t, s.Branches[0].PullRequest)
+	assert.Equal(t, 20, s.Branches[0].PullRequest.Number)
+	assert.True(t, s.Branches[0].PullRequest.Merged)
+	assert.False(t, apiCalled, "no API calls should be made for merged branches")
+}
+
+func TestSyncStackPRs_ClosedPR_ReplacedByOpenPR(t *testing.T) {
+	// A tracked PR that was closed (not merged) should be replaced
+	// by a new OPEN PR if one exists.
+	s := &stack.Stack{
+		Trunk: stack.BranchRef{Branch: "main"},
+		Branches: []stack.BranchRef{
+			{
+				Branch: "feature",
+				PullRequest: &stack.PullRequestRef{
+					Number: 10,
+					ID:     "MR_10",
+					URL:    "https://gitlab.com/o/r/-/merge_requests/10",
+				},
+			},
+		},
+	}
+
+	cfg, outR, errR := config.NewTestConfig()
+	cfg.GitLabClientOverride = &gitlab.MockClient{
+		FindPRByNumberFn: func(number int) (*gitlab.PullRequest, error) {
+			return &gitlab.PullRequest{
+				Number: 10,
+				State:  "CLOSED",
+				Merged: false,
+			}, nil
+		},
+		FindPRForBranchFn: func(branch string) (*gitlab.PullRequest, error) {
+			return &gitlab.PullRequest{
+				Number: 15,
+				ID:     "MR_15",
+				URL:    "https://gitlab.com/o/r/-/merge_requests/15",
+				State:  "OPEN",
+			}, nil
+		},
+	}
+
+	_ = syncStackPRs(cfg, s)
+	collectOutput(cfg, outR, errR)
+
+	require.NotNil(t, s.Branches[0].PullRequest)
+	assert.Equal(t, 15, s.Branches[0].PullRequest.Number)
+	assert.False(t, s.Branches[0].PullRequest.Merged)
+}
+
+func TestSyncStackPRs_TrackedOpenPR_UpdatesQueued(t *testing.T) {
+	// A tracked OPEN PR that enters a merge queue should have Queued set.
+	s := &stack.Stack{
+		Trunk: stack.BranchRef{Branch: "main"},
+		Branches: []stack.BranchRef{
+			{
+				Branch: "feature",
+				PullRequest: &stack.PullRequestRef{
+					Number: 42,
+					ID:     "MR_42",
+					URL:    "https://gitlab.com/o/r/-/merge_requests/42",
+				},
+			},
+		},
+	}
+
+	cfg, outR, errR := config.NewTestConfig()
+	cfg.GitLabClientOverride = &gitlab.MockClient{
+		FindPRByNumberFn: func(number int) (*gitlab.PullRequest, error) {
+			return &gitlab.PullRequest{
+				Number: 42,
+				State:  "OPEN",
+				MergeQueueEntry: &gitlab.MergeQueueEntry{
+					ID: "MQ_1",
+				},
+			}, nil
+		},
+	}
+
+	_ = syncStackPRs(cfg, s)
+	collectOutput(cfg, outR, errR)
+
+	assert.True(t, s.Branches[0].Queued)
+}
+
+func TestSyncStackPRs_ClosedPR_NoReplacement_ClearsPR(t *testing.T) {
+	// A tracked PR that was closed with no replacement OPEN PR should
+	// have its PR ref cleared so it doesn't appear as an active PR.
+	s := &stack.Stack{
+		Trunk: stack.BranchRef{Branch: "main"},
+		Branches: []stack.BranchRef{
+			{
+				Branch: "feature",
+				PullRequest: &stack.PullRequestRef{
+					Number: 10,
+					ID:     "MR_10",
+					URL:    "https://gitlab.com/o/r/-/merge_requests/10",
+				},
+				Queued: true,
+			},
+		},
+	}
+
+	cfg, outR, errR := config.NewTestConfig()
+	cfg.GitLabClientOverride = &gitlab.MockClient{
+		FindPRByNumberFn: func(number int) (*gitlab.PullRequest, error) {
+			return &gitlab.PullRequest{
+				Number: 10,
+				State:  "CLOSED",
+				Merged: false,
+			}, nil
+		},
+		FindPRForBranchFn: func(branch string) (*gitlab.PullRequest, error) {
+			return nil, nil // no open replacement
+		},
+	}
+
+	_ = syncStackPRs(cfg, s)
+	collectOutput(cfg, outR, errR)
+
+	assert.Nil(t, s.Branches[0].PullRequest)
+	assert.False(t, s.Branches[0].Queued)
+}
+
+func TestSyncStackPRs_RemoteStack_UsesStackAPI(t *testing.T) {
+	// When the stack has a remote ID, sync should use the stack API
+	// as source of truth, matching PRs to branches by head ref name.
+	s := &stack.Stack{
+		ID:    "100",
+		Trunk: stack.BranchRef{Branch: "main"},
+		Branches: []stack.BranchRef{
+			{Branch: "b1"},
+			{Branch: "b2"},
+		},
+	}
+
+	cfg, outR, errR := config.NewTestConfig()
+	cfg.GitLabClientOverride = &gitlab.MockClient{
+		ListStacksFn: func() ([]gitlab.RemoteStack, error) {
+			return []gitlab.RemoteStack{
+				{ID: 100, PullRequests: []int{10, 11}},
+			}, nil
+		},
+		FindPRByNumberFn: func(number int) (*gitlab.PullRequest, error) {
+			switch number {
+			case 10:
+				return &gitlab.PullRequest{Number: 10, ID: "MR_10", URL: "https://gitlab.com/o/r/-/merge_requests/10", HeadRefName: "b1", State: "OPEN"}, nil
+			case 11:
+				return &gitlab.PullRequest{Number: 11, ID: "MR_11", URL: "https://gitlab.com/o/r/-/merge_requests/11", HeadRefName: "b2", State: "MERGED", Merged: true}, nil
+			}
+			return nil, nil
+		},
+	}
+
+	_ = syncStackPRs(cfg, s)
+	collectOutput(cfg, outR, errR)
+
+	// b1 should be tracked with open PR
+	require.NotNil(t, s.Branches[0].PullRequest)
+	assert.Equal(t, 10, s.Branches[0].PullRequest.Number)
+	assert.False(t, s.Branches[0].PullRequest.Merged)
+
+	// b2 should be tracked with merged PR (stack API keeps closed/merged PRs)
+	require.NotNil(t, s.Branches[1].PullRequest)
+	assert.Equal(t, 11, s.Branches[1].PullRequest.Number)
+	assert.True(t, s.Branches[1].PullRequest.Merged)
+}
+
+func TestSyncStackPRs_BackfillsStackNumber(t *testing.T) {
+	// A stack tracked before the number was recorded (Number == 0) gets its
+	// number backfilled from the remote during the shared sync, so callers can
+	// display it.
+	s := &stack.Stack{
+		ID:    "100", // legacy: Number unset
+		Trunk: stack.BranchRef{Branch: "main"},
+		Branches: []stack.BranchRef{
+			{Branch: "b1"},
+			{Branch: "b2"},
+		},
+	}
+
+	cfg, outR, errR := config.NewTestConfig()
+	cfg.GitLabClientOverride = &gitlab.MockClient{
+		ListStacksFn: func() ([]gitlab.RemoteStack, error) {
+			return []gitlab.RemoteStack{
+				{ID: 100, Number: 5, PullRequests: []int{10, 11}},
+			}, nil
+		},
+		FindPRByNumberFn: func(number int) (*gitlab.PullRequest, error) {
+			switch number {
+			case 10:
+				return &gitlab.PullRequest{Number: 10, HeadRefName: "b1", State: "OPEN"}, nil
+			case 11:
+				return &gitlab.PullRequest{Number: 11, HeadRefName: "b2", State: "OPEN"}, nil
+			}
+			return nil, nil
+		},
+	}
+
+	_ = syncStackPRs(cfg, s)
+	collectOutput(cfg, outR, errR)
+
+	assert.Equal(t, 5, s.Number, "the stack number should be backfilled from the remote")
+}
+
+func TestSyncStackPRs_RemoteStack_ClosedPRStaysAssociated(t *testing.T) {
+	// When using the stack API, a closed (not merged) PR should remain
+	// associated — the stack API is the source of truth, not PR state.
+	s := &stack.Stack{
+		ID:    "200",
+		Trunk: stack.BranchRef{Branch: "main"},
+		Branches: []stack.BranchRef{
+			{Branch: "feature", PullRequest: &stack.PullRequestRef{Number: 5}},
+		},
+	}
+
+	cfg, outR, errR := config.NewTestConfig()
+	cfg.GitLabClientOverride = &gitlab.MockClient{
+		ListStacksFn: func() ([]gitlab.RemoteStack, error) {
+			return []gitlab.RemoteStack{
+				{ID: 200, PullRequests: []int{5}},
+			}, nil
+		},
+		FindPRByNumberFn: func(number int) (*gitlab.PullRequest, error) {
+			return &gitlab.PullRequest{Number: 5, ID: "MR_5", URL: "https://gitlab.com/o/r/-/merge_requests/5", HeadRefName: "feature", State: "CLOSED"}, nil
+		},
+	}
+
+	_ = syncStackPRs(cfg, s)
+	collectOutput(cfg, outR, errR)
+
+	// PR should still be associated (not cleared), because the stack API says it's part of the stack.
+	require.NotNil(t, s.Branches[0].PullRequest)
+	assert.Equal(t, 5, s.Branches[0].PullRequest.Number)
+	assert.False(t, s.Branches[0].PullRequest.Merged)
+}
+
+func TestSyncStackPRs_RemoteStack_FallsBackOnAPIError(t *testing.T) {
+	// If the stack API fails, fall back to local discovery.
+	s := &stack.Stack{
+		ID:    "300",
+		Trunk: stack.BranchRef{Branch: "main"},
+		Branches: []stack.BranchRef{
+			{Branch: "feature"},
+		},
+	}
+
+	cfg, outR, errR := config.NewTestConfig()
+	cfg.GitLabClientOverride = &gitlab.MockClient{
+		ListStacksFn: func() ([]gitlab.RemoteStack, error) {
+			return nil, fmt.Errorf("API error")
+		},
+		FindPRForBranchFn: func(branch string) (*gitlab.PullRequest, error) {
+			return &gitlab.PullRequest{Number: 77, ID: "MR_77", URL: "https://gitlab.com/o/r/-/merge_requests/77", State: "OPEN"}, nil
+		},
+	}
+
+	_ = syncStackPRs(cfg, s)
+	collectOutput(cfg, outR, errR)
+
+	// Should have fallen back to local discovery and found the open PR.
+	require.NotNil(t, s.Branches[0].PullRequest)
+	assert.Equal(t, 77, s.Branches[0].PullRequest.Number)
+}
+
+func TestParsePRURL(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		wantN  int
+		wantOK bool
+	}{
+		{"standard URL", "https://gitlab.com/owner/repo/-/merge_requests/42", 42, true},
+		{"with trailing slash", "https://gitlab.com/owner/repo/-/merge_requests/42/", 42, true},
+		{"with files tab", "https://gitlab.com/owner/repo/-/merge_requests/42/files", 42, true},
+		{"GHES URL", "https://ghes.example.com/owner/repo/-/merge_requests/99", 99, true},
+		{"GHES URL with trailing slash", "https://ghes.example.com/owner/repo/-/merge_requests/7/", 7, true},
+		{"not a MR URL", "https://gitlab.com/owner/repo/issues/42", 0, false},
+		{"plain number", "42", 0, false},
+		{"branch name", "feat-1", 0, false},
+		{"empty", "", 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			n, ok := parsePRURL(tt.input)
+			assert.Equal(t, tt.wantOK, ok)
+			if ok {
+				assert.Equal(t, tt.wantN, n)
+			}
+		})
+	}
+}
+
+func TestStackNeedsRebase_AllCurrent(t *testing.T) {
+	s := &stack.Stack{
+		Trunk: stack.BranchRef{Branch: "main"},
+		Branches: []stack.BranchRef{
+			{Branch: "b1"},
+			{Branch: "b2"},
+		},
+	}
+
+	mock := &git.MockOps{
+		IsAncestorFn: func(a, d string) (bool, error) {
+			return true, nil
+		},
+	}
+	restore := git.SetOps(mock)
+	defer restore()
+
+	assert.False(t, stackNeedsRebase(s, ""), "stack should not need rebase when all branches are current")
+}
+
+func TestStackNeedsRebase_FirstBranchStale(t *testing.T) {
+	s := &stack.Stack{
+		Trunk: stack.BranchRef{Branch: "main"},
+		Branches: []stack.BranchRef{
+			{Branch: "b1"},
+			{Branch: "b2"},
+		},
+	}
+
+	mock := &git.MockOps{
+		IsAncestorFn: func(a, d string) (bool, error) {
+			if a == "main" && d == "b1" {
+				return false, nil
+			}
+			return true, nil
+		},
+	}
+	restore := git.SetOps(mock)
+	defer restore()
+
+	assert.True(t, stackNeedsRebase(s, ""), "stack should need rebase when first branch is stale")
+}
+
+func TestStackNeedsRebase_SkipsMergedBranches(t *testing.T) {
+	s := &stack.Stack{
+		Trunk: stack.BranchRef{Branch: "main"},
+		Branches: []stack.BranchRef{
+			{Branch: "b1", PullRequest: &stack.PullRequestRef{Merged: true}},
+			{Branch: "b2"},
+		},
+	}
+
+	mock := &git.MockOps{
+		IsAncestorFn: func(a, d string) (bool, error) {
+			return true, nil
+		},
+	}
+	restore := git.SetOps(mock)
+	defer restore()
+
+	assert.False(t, stackNeedsRebase(s, ""), "should skip merged branches and find stack up to date")
+}
+
+// setTestRepo sets RepoOverride so tests don't depend on real git context.
+func setTestRepo(cfg *config.Config) {
+	cfg.RepoOverride = &repository.Repository{Host: "gitlab.com", Owner: "o", Name: "r"}
+}
+
+func TestWarnStacksUnavailable_ShowsNotEnabled(t *testing.T) {
+	cfg, _, errR := config.NewTestConfig()
+
+	warnStacksUnavailable(cfg)
+
+	cfg.Err.Close()
+	errOut, _ := io.ReadAll(errR)
+	output := string(errOut)
+
+	assert.Contains(t, output, "GitLab merge requests are unavailable; check your token and project access")
+}
+
+func TestEnsureLocalTrunk_AlreadyExists(t *testing.T) {
+	mock := &git.MockOps{
+		BranchExistsFn: func(name string) bool {
+			return name == "main"
+		},
+	}
+	restore := git.SetOps(mock)
+	defer restore()
+
+	cfg, _, _ := config.NewTestConfig()
+	err := ensureLocalTrunk(cfg, "main", "origin")
+	assert.NoError(t, err)
+}
+
+func TestEnsureLocalTrunk_FetchesAndCreates(t *testing.T) {
+	var fetchedBranches []string
+	var createdBranch, createdBase string
+
+	mock := &git.MockOps{
+		BranchExistsFn: func(name string) bool {
+			return false
+		},
+		FetchBranchesFn: func(remote string, branches []string) error {
+			fetchedBranches = branches
+			return nil
+		},
+		CreateBranchFn: func(name, base string) error {
+			createdBranch = name
+			createdBase = base
+			return nil
+		},
+	}
+	restore := git.SetOps(mock)
+	defer restore()
+
+	cfg, _, _ := config.NewTestConfig()
+	err := ensureLocalTrunk(cfg, "main", "origin")
+
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"main"}, fetchedBranches)
+	assert.Equal(t, "main", createdBranch)
+	assert.Equal(t, "origin/main", createdBase)
+}
+
+func TestEnsureLocalTrunk_FetchFails(t *testing.T) {
+	mock := &git.MockOps{
+		BranchExistsFn: func(name string) bool {
+			return false
+		},
+		FetchBranchesFn: func(remote string, branches []string) error {
+			return fmt.Errorf("network error")
+		},
+	}
+	restore := git.SetOps(mock)
+	defer restore()
+
+	cfg, _, _ := config.NewTestConfig()
+	err := ensureLocalTrunk(cfg, "main", "origin")
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "could not fetch trunk branch main from origin")
+}
+
+func TestEnsureLocalTrunk_CreateFails(t *testing.T) {
+	mock := &git.MockOps{
+		BranchExistsFn: func(name string) bool {
+			return false
+		},
+		FetchBranchesFn: func(remote string, branches []string) error {
+			return nil
+		},
+		CreateBranchFn: func(name, base string) error {
+			return fmt.Errorf("ref not found")
+		},
+	}
+	restore := git.SetOps(mock)
+	defer restore()
+
+	cfg, _, _ := config.NewTestConfig()
+	err := ensureLocalTrunk(cfg, "main", "origin")
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "could not create local trunk branch main")
+}
+
+func TestEnrichPRContent(t *testing.T) {
+	calls := 0
+	client := &gitlab.MockClient{
+		FindPRByNumberFn: func(number int) (*gitlab.PullRequest, error) {
+			calls++
+			return &gitlab.PullRequest{Number: number, Title: "Fetched title", Body: "Fetched body"}, nil
+		},
+	}
+	details := map[string]*gitlab.PRDetails{
+		"merged": {Number: 10, State: "MERGED"},                // missing title -> fetched
+		"open":   {Number: 11, State: "OPEN", Title: "Has it"}, // already has a title -> skipped
+		"nonum":  {Number: 0, State: "OPEN"},                   // no number -> skipped
+	}
+
+	enrichPRContent(client, details)
+
+	assert.Equal(t, 1, calls, "only the title-less MR with a number is fetched")
+	assert.Equal(t, "Fetched title", details["merged"].Title)
+	assert.Equal(t, "Fetched body", details["merged"].Body)
+	assert.Equal(t, "Has it", details["open"].Title, "MRs that already have a title are untouched")
+}
+
+func TestUpdateBaseSHAsPreservesLastValidBase(t *testing.T) {
+	s := &stack.Stack{
+		Trunk: stack.BranchRef{Branch: "main"},
+		Branches: []stack.BranchRef{
+			{Branch: "parent", Base: "main-tip"},
+			{Branch: "child", Base: "old-parent"},
+		},
+	}
+
+	restore := git.SetOps(&git.MockOps{
+		RevParseFn: func(ref string) (string, error) {
+			switch ref {
+			case "main":
+				return "main-tip", nil
+			case "parent":
+				return "amended-parent", nil
+			case "child":
+				return "child-tip", nil
+			default:
+				return "", errors.New("unknown ref")
+			}
+		},
+		IsAncestorFn: func(ancestor, branch string) (bool, error) {
+			return !(ancestor == "amended-parent" && branch == "child"), nil
+		},
+	})
+	defer restore()
+
+	updateBaseSHAs(s)
+
+	assert.Equal(t, "old-parent", s.Branches[1].Base)
+	assert.Equal(t, "child-tip", s.Branches[1].Head)
+}

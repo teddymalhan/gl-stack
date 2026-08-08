@@ -1,0 +1,66 @@
+package cmd
+
+import (
+	"errors"
+
+	"github.com/spf13/cobra"
+	"github.com/teddymalhan/github-stacker-prs/internal/config"
+	"github.com/teddymalhan/github-stacker-prs/internal/git"
+)
+
+func TrunkCmd(cfg *config.Config) *cobra.Command {
+	return &cobra.Command{
+		Use:   "trunk",
+		Short: "Check out the trunk branch of the stack",
+		Long: `Check out the trunk branch of the current stack.
+
+The trunk is the base branch that the stack is built on (e.g., main or develop).
+You must be on a branch that is part of a stack.`,
+		Example: `  # Jump to the trunk branch
+  $ gl-stack trunk`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTrunk(cfg)
+		},
+	}
+}
+
+func runTrunk(cfg *config.Config) error {
+	result, err := loadStack(cfg, "")
+	if err != nil {
+		if errors.Is(err, errInterrupt) {
+			return ErrSilent
+		}
+		return ErrNotInStack
+	}
+	s := result.Stack
+	currentBranch := result.CurrentBranch
+	trunk := s.Trunk.Branch
+
+	if currentBranch == trunk {
+		cfg.Printf("Already on trunk branch %s", trunk)
+		return nil
+	}
+
+	// Ensure trunk exists locally before checkout.
+	if !git.BranchExists(trunk) {
+		remote, err := pickRemote(cfg, currentBranch, "")
+		if err != nil {
+			if !errors.Is(err, errInterrupt) {
+				cfg.Errorf("failed to resolve remote: %s", err)
+			}
+			return ErrSilent
+		}
+		if err := ensureLocalTrunk(cfg, trunk, remote); err != nil {
+			cfg.Errorf("%s", err)
+			return ErrSilent
+		}
+	}
+
+	if err := git.CheckoutBranch(trunk); err != nil {
+		return err
+	}
+
+	cfg.Successf("Switched to %s", trunk)
+	return nil
+}
