@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/teddymalhan/github-stacker-prs/internal/tui/shared"
+	"github.com/teddymalhan/gl-stack/internal/tui/shared"
 )
 
 var (

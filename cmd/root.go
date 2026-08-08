@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/teddymalhan/github-stacker-prs/internal/config"
-	"github.com/teddymalhan/github-stacker-prs/internal/theme"
+	"github.com/teddymalhan/gl-stack/internal/config"
+	"github.com/teddymalhan/gl-stack/internal/theme"
 )
 
 func RootCmd() *cobra.Command {

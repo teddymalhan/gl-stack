@@ -7,8 +7,8 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/teddymalhan/github-stacker-prs/internal/theme"
-	"github.com/teddymalhan/github-stacker-prs/internal/tui/shared"
+	"github.com/teddymalhan/gl-stack/internal/theme"
+	"github.com/teddymalhan/gl-stack/internal/tui/shared"
 )
 
 // Model is the Bubble Tea model backing the merge wizard.

@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/teddymalhan/github-stacker-prs/internal/tui/shared"
+	"github.com/teddymalhan/gl-stack/internal/tui/shared"
 )
 
 // Chrome styles shared across the submit views.

@@ -12,8 +12,8 @@ import (
 	"github.com/cli/go-gh/v2/pkg/repository"
 	"github.com/cli/go-gh/v2/pkg/term"
 
-	glapi "github.com/teddymalhan/github-stacker-prs/internal/gitlab"
-	"github.com/teddymalhan/github-stacker-prs/internal/theme"
+	glapi "github.com/teddymalhan/gl-stack/internal/gitlab"
+	"github.com/teddymalhan/gl-stack/internal/theme"
 )
 
 // Config holds shared state for all commands.

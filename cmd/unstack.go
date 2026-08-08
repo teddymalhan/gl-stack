@@ -6,10 +6,10 @@ import (
 
 	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/spf13/cobra"
-	"github.com/teddymalhan/github-stacker-prs/internal/config"
-	"github.com/teddymalhan/github-stacker-prs/internal/gitlab"
-	"github.com/teddymalhan/github-stacker-prs/internal/modify"
-	"github.com/teddymalhan/github-stacker-prs/internal/stack"
+	"github.com/teddymalhan/gl-stack/internal/config"
+	"github.com/teddymalhan/gl-stack/internal/gitlab"
+	"github.com/teddymalhan/gl-stack/internal/modify"
+	"github.com/teddymalhan/gl-stack/internal/stack"
 )
 
 type unstackOptions struct {

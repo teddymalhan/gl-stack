@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/teddymalhan/github-stacker-prs/internal/config"
+	"github.com/teddymalhan/gl-stack/internal/config"
 )
 
 func TestAliasCmd_ValidatesName(t *testing.T) {

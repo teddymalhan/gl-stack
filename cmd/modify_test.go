@@ -10,13 +10,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/teddymalhan/github-stacker-prs/internal/config"
-	"github.com/teddymalhan/github-stacker-prs/internal/git"
-	"github.com/teddymalhan/github-stacker-prs/internal/gitlab"
-	"github.com/teddymalhan/github-stacker-prs/internal/modify"
-	"github.com/teddymalhan/github-stacker-prs/internal/stack"
-	"github.com/teddymalhan/github-stacker-prs/internal/tui/modifyview"
-	"github.com/teddymalhan/github-stacker-prs/internal/tui/stackview"
+	"github.com/teddymalhan/gl-stack/internal/config"
+	"github.com/teddymalhan/gl-stack/internal/git"
+	"github.com/teddymalhan/gl-stack/internal/gitlab"
+	"github.com/teddymalhan/gl-stack/internal/modify"
+	"github.com/teddymalhan/gl-stack/internal/stack"
+	"github.com/teddymalhan/gl-stack/internal/tui/modifyview"
+	"github.com/teddymalhan/gl-stack/internal/tui/stackview"
 )
 
 // ---------------------------------------------------------------------------

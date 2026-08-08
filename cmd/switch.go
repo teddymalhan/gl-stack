@@ -5,8 +5,8 @@ import (
 
 	"github.com/cli/go-gh/v2/pkg/prompter"
 	"github.com/spf13/cobra"
-	"github.com/teddymalhan/github-stacker-prs/internal/config"
-	"github.com/teddymalhan/github-stacker-prs/internal/git"
+	"github.com/teddymalhan/gl-stack/internal/config"
+	"github.com/teddymalhan/gl-stack/internal/git"
 )
 
 func SwitchCmd(cfg *config.Config) *cobra.Command {

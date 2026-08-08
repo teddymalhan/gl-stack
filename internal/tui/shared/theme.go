@@ -1,6 +1,6 @@
 package shared
 
-import "github.com/teddymalhan/github-stacker-prs/internal/theme"
+import "github.com/teddymalhan/gl-stack/internal/theme"
 
 // The background-aware color palette lives in internal/theme so it can be shared
 // by both the TUIs and ordinary command output. These aliases keep the TUI code

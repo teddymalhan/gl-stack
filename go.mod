@@ -1,4 +1,4 @@
-module github.com/teddymalhan/github-stacker-prs
+module github.com/teddymalhan/gl-stack
 
 go 1.26.0
 

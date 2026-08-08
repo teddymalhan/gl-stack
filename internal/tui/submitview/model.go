@@ -5,7 +5,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/teddymalhan/github-stacker-prs/internal/stack"
+	"github.com/teddymalhan/gl-stack/internal/stack"
 )
 
 // editField identifies the focused field in the right editor panel.

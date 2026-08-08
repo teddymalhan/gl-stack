@@ -6,12 +6,12 @@ import (
 
 	"github.com/cli/go-gh/v2/pkg/browser"
 	"github.com/spf13/cobra"
-	"github.com/teddymalhan/github-stacker-prs/internal/config"
+	"github.com/teddymalhan/gl-stack/internal/config"
 )
 
 const (
-	feedbackURL     = "https://github.com/teddymalhan/github-stacker-prs/issues"
-	feedbackFormURL = "https://github.com/teddymalhan/github-stacker-prs/issues/new"
+	feedbackURL     = "https://github.com/teddymalhan/gl-stack/issues"
+	feedbackFormURL = "https://github.com/teddymalhan/gl-stack/issues/new"
 )
 
 func FeedbackCmd(cfg *config.Config) *cobra.Command {

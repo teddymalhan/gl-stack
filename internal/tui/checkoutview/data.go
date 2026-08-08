@@ -11,8 +11,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/teddymalhan/github-stacker-prs/internal/gitlab"
-	"github.com/teddymalhan/github-stacker-prs/internal/stack"
+	"github.com/teddymalhan/gl-stack/internal/gitlab"
+	"github.com/teddymalhan/gl-stack/internal/stack"
 )
 
 // StackType classifies where a stack lives.

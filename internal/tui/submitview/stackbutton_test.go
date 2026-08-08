@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
-	"github.com/teddymalhan/github-stacker-prs/internal/stack"
+	"github.com/teddymalhan/gl-stack/internal/stack"
 )
 
 // deselectedNew builds a NEW branch node that the user has deselected.

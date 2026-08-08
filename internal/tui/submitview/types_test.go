@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/teddymalhan/github-stacker-prs/internal/stack"
-	"github.com/teddymalhan/github-stacker-prs/internal/tui/stackview"
+	"github.com/teddymalhan/gl-stack/internal/stack"
+	"github.com/teddymalhan/gl-stack/internal/tui/stackview"
 )
 
 func TestBranchStatePredicates(t *testing.T) {

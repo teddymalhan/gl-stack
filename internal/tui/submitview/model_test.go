@@ -6,9 +6,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	glapi "github.com/teddymalhan/github-stacker-prs/internal/gitlab"
-	"github.com/teddymalhan/github-stacker-prs/internal/stack"
-	"github.com/teddymalhan/github-stacker-prs/internal/tui/stackview"
+	glapi "github.com/teddymalhan/gl-stack/internal/gitlab"
+	"github.com/teddymalhan/gl-stack/internal/stack"
+	"github.com/teddymalhan/gl-stack/internal/tui/stackview"
 )
 
 // --- test helpers ---

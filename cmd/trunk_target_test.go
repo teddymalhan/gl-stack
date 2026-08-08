@@ -9,9 +9,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/teddymalhan/github-stacker-prs/internal/config"
-	"github.com/teddymalhan/github-stacker-prs/internal/git"
-	"github.com/teddymalhan/github-stacker-prs/internal/stack"
+	"github.com/teddymalhan/gl-stack/internal/config"
+	"github.com/teddymalhan/gl-stack/internal/git"
+	"github.com/teddymalhan/gl-stack/internal/stack"
 )
 
 func trunkTargetMock(localSHA, remoteSHA string) *git.MockOps {

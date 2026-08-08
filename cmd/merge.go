@@ -11,11 +11,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/spf13/cobra"
-	"github.com/teddymalhan/github-stacker-prs/internal/config"
-	"github.com/teddymalhan/github-stacker-prs/internal/git"
-	"github.com/teddymalhan/github-stacker-prs/internal/gitlab"
-	"github.com/teddymalhan/github-stacker-prs/internal/stack"
-	"github.com/teddymalhan/github-stacker-prs/internal/tui/mergeview"
+	"github.com/teddymalhan/gl-stack/internal/config"
+	"github.com/teddymalhan/gl-stack/internal/git"
+	"github.com/teddymalhan/gl-stack/internal/gitlab"
+	"github.com/teddymalhan/gl-stack/internal/stack"
+	"github.com/teddymalhan/gl-stack/internal/tui/mergeview"
 )
 
 type mergeOptions struct {

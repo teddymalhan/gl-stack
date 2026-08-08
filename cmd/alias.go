@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/teddymalhan/github-stacker-prs/internal/config"
+	"github.com/teddymalhan/gl-stack/internal/config"
 )
 
 const (

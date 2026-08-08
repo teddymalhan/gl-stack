@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/teddymalhan/github-stacker-prs/internal/theme"
+	"github.com/teddymalhan/gl-stack/internal/theme"
 )
 
 var (

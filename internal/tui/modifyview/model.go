@@ -8,10 +8,10 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/teddymalhan/github-stacker-prs/internal/git"
-	"github.com/teddymalhan/github-stacker-prs/internal/stack"
-	"github.com/teddymalhan/github-stacker-prs/internal/tui/shared"
-	"github.com/teddymalhan/github-stacker-prs/internal/tui/stackview"
+	"github.com/teddymalhan/gl-stack/internal/git"
+	"github.com/teddymalhan/gl-stack/internal/stack"
+	"github.com/teddymalhan/gl-stack/internal/tui/shared"
+	"github.com/teddymalhan/gl-stack/internal/tui/stackview"
 )
 
 // modifyKeyMap defines key bindings for the modify view.

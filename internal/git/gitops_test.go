@@ -137,7 +137,7 @@ func TestIntegration_Push_ExistingBranchCurrentTrackingRef(t *testing.T) {
 }
 
 // Test 2: Branch exists remotely but tracking ref was deleted locally.
-// This is the regression test for https://github.com/teddymalhan/github-stacker-prs/issues/118.
+// This is the regression test for https://github.com/teddymalhan/gl-stack/issues/118.
 func TestIntegration_Push_TrackingRefDeletedLocally(t *testing.T) {
 	bareDir, cloneDir := setupBareAndClone(t)
 	restore := withGitDir(t, cloneDir)

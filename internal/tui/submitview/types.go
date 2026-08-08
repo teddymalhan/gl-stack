@@ -11,7 +11,7 @@
 package submitview
 
 import (
-	"github.com/teddymalhan/github-stacker-prs/internal/tui/stackview"
+	"github.com/teddymalhan/gl-stack/internal/tui/stackview"
 )
 
 // BranchState classifies a branch by the status of its merge request. The state

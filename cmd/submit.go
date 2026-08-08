@@ -10,14 +10,14 @@ import (
 	"github.com/cli/go-gh/v2/pkg/api"
 	"github.com/cli/go-gh/v2/pkg/prompter"
 	"github.com/spf13/cobra"
-	"github.com/teddymalhan/github-stacker-prs/internal/config"
-	"github.com/teddymalhan/github-stacker-prs/internal/git"
-	"github.com/teddymalhan/github-stacker-prs/internal/gitlab"
-	"github.com/teddymalhan/github-stacker-prs/internal/modify"
-	"github.com/teddymalhan/github-stacker-prs/internal/pr"
-	"github.com/teddymalhan/github-stacker-prs/internal/stack"
-	"github.com/teddymalhan/github-stacker-prs/internal/tui/stackview"
-	"github.com/teddymalhan/github-stacker-prs/internal/tui/submitview"
+	"github.com/teddymalhan/gl-stack/internal/config"
+	"github.com/teddymalhan/gl-stack/internal/git"
+	"github.com/teddymalhan/gl-stack/internal/gitlab"
+	"github.com/teddymalhan/gl-stack/internal/modify"
+	"github.com/teddymalhan/gl-stack/internal/pr"
+	"github.com/teddymalhan/gl-stack/internal/stack"
+	"github.com/teddymalhan/gl-stack/internal/tui/stackview"
+	"github.com/teddymalhan/gl-stack/internal/tui/submitview"
 )
 
 type submitOptions struct {
@@ -445,7 +445,7 @@ func generatePRBody(commitBody string, templateContent string) string {
 	}
 
 	footer := fmt.Sprintf(
-		"<sub>Stack created with <a href=\"https://github.com/teddymalhan/github-stacker-prs\">gl-stack</a> • <a href=\"%s\">Give feedback</a></sub>",
+		"<sub>Stack created with <a href=\"https://github.com/teddymalhan/gl-stack\">gl-stack</a> • <a href=\"%s\">Give feedback</a></sub>",
 		feedbackURL,
 	)
 	parts = append(parts, footer)

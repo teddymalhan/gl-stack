@@ -3,7 +3,7 @@ package submitview
 import (
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/teddymalhan/github-stacker-prs/internal/tui/shared"
+	"github.com/teddymalhan/gl-stack/internal/tui/shared"
 )
 
 // State foreground colors, matching how GitLab.com colors these PR states. Each

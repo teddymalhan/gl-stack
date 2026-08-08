@@ -4,8 +4,8 @@ import (
 	"errors"
 
 	"github.com/spf13/cobra"
-	"github.com/teddymalhan/github-stacker-prs/internal/config"
-	"github.com/teddymalhan/github-stacker-prs/internal/git"
+	"github.com/teddymalhan/gl-stack/internal/config"
+	"github.com/teddymalhan/gl-stack/internal/git"
 )
 
 func TrunkCmd(cfg *config.Config) *cobra.Command {
