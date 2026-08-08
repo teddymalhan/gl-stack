@@ -1,5 +1,8 @@
 # gl-stack
 
+<img width="960" height="894" alt="demo" src="https://github.com/user-attachments/assets/a418532f-81fa-4978-9add-f44388bd5910" />
+
+
 A CLI for managing stacked branches and merge requests on GitLab.
 
 ## GitLab authentication
