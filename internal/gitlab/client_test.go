@@ -32,9 +32,11 @@ func TestStacksFromMergeRequests(t *testing.T) {
 }
 
 func TestFindPRForBranchUsesGitLabAPI(t *testing.T) {
-	var gotToken string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotToken = r.Header.Get("MRIVATE-TOKEN")
+		if r.Header.Get("PRIVATE-TOKEN") != "secret" {
+			http.Error(w, `{"error":"Not Found"}`, http.StatusNotFound)
+			return
+		}
 		assert.Equal(t, "/projects/group%2Fproject/merge_requests", r.URL.EscapedPath())
 		assert.Equal(t, "feature", r.URL.Query().Get("source_branch"))
 		_ = json.NewEncoder(w).Encode([]mergeRequestWire{{
@@ -51,5 +53,4 @@ func TestFindPRForBranchUsesGitLabAPI(t *testing.T) {
 	assert.Equal(t, 42, mr.Number)
 	assert.Equal(t, "feature", mr.HeadRefName)
 	assert.Equal(t, "main", mr.BaseRefName)
-	assert.Equal(t, "secret", gotToken)
 }

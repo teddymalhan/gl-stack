@@ -111,7 +111,7 @@ func (c *Client) request(method, path string, query url.Values, body any, out an
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("MRIVATE-TOKEN", c.token)
+	req.Header.Set("PRIVATE-TOKEN", c.token)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("calling GitLab: %w", err)
