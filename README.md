@@ -23,6 +23,22 @@ source ~/.zshrc
 source ~/.bashrc
 ```
 
+## AI agent skill
+
+Install the `gl-stack` skill in your current project so supported coding agents know how to create,
+navigate, submit, and recover stacked GitLab merge requests:
+
+```sh
+npx skills add teddymalhan/gl-stack --skill gl-stack
+```
+
+The default installation is project-local and can be committed with your project. To make the skill
+available across all projects instead, add `--global`:
+
+```sh
+npx skills add teddymalhan/gl-stack --skill gl-stack --global
+```
+
 ## GitLab authentication
 
 Create a [personal access token](https://docs.gitlab.com/user/profile/personal_access_tokens/)
